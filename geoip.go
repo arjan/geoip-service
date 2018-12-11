@@ -11,19 +11,18 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"github.com/woothee/woothee-go"
 )
 
-//go:generate ffjson --nodecoder $GOFILE
-
-// ffjson: nodecoder
 type ResponseCity struct {
-	Data  *geoip2.City `json:",omitempty"`
-	Error string       `json:",omitempty"`
+	Data  *geoip2.City    `json:",omitempty"`
+	UA    *woothee.Result `json:",omitempty"`
+	Error string          `json:",omitempty"`
 }
 
-// ffjson: nodecoder
 type ResponseCountry struct {
 	Data  *geoip2.Country `json:",omitempty"`
+	UA    *woothee.Result `json:",omitempty"`
 	Error string          `json:",omitempty"`
 }
 
@@ -32,7 +31,6 @@ func main() {
 	var lookup = flag.String("lookup", "city", "Specify which value to look up. Can be 'city' or 'country' depending on which database you load.")
 	var listen = flag.String("listen", ":5000", "Listen address and port, for instance 127.0.0.1:5000")
 	var threads = flag.Int("threads", runtime.NumCPU(), "Number of threads to use. Defaults to number of detected cores")
-	var pretty = flag.Bool("pretty", false, "Should output be formatted with newlines and intentation")
 	var cacheSecs = flag.Int("cache", 0, "How many seconds should requests be cached. Set to 0 to disable")
 	var originPolicy = flag.String("origin", "*", `Value sent in the 'Access-Control-Allow-Origin' header. Set to "" to disable.`)
 	serverStart := time.Now().Format(http.TimeFormat)
@@ -59,7 +57,6 @@ func main() {
 	log.Println("Loaded database " + *dbName)
 
 	// We dereference this to avoid a pretty big penalty under heavy load.
-	prettyL := *pretty
 
 	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		var ipText string
@@ -67,6 +64,12 @@ func main() {
 		var cached []byte
 		var returnError string
 		var result interface{} = nil
+		var ua *woothee.Result = nil
+
+		var uaText = req.URL.Query().Get("ua")
+		if uaText != "" {
+			ua, err = woothee.Parse(uaText)
+		}
 
 		defer func() {
 			var j []byte
@@ -76,20 +79,12 @@ func main() {
 			} else {
 				city, ok := result.(*geoip2.City)
 				if ok {
-					res := ResponseCity{Data: city, Error: returnError}
-					if prettyL {
-						j, err = json.MarshalIndent(res, "", "  ")
-					} else {
-						j, err = res.MarshalJSON()
-					}
+					res := ResponseCity{Data: city, Error: returnError, UA: ua}
+					j, err = json.Marshal(res)
 				} else {
 					country, _ := result.(*geoip2.Country)
-					res := ResponseCountry{Data: country, Error: returnError}
-					if prettyL {
-						j, err = json.MarshalIndent(res, "", "  ")
-					} else {
-						j, err = res.MarshalJSON()
-					}
+					res := ResponseCountry{Data: country, Error: returnError, UA: ua}
+					j, err = json.Marshal(res)
 				}
 				if err != nil {
 					log.Fatal(err)
